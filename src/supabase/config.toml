@@ -1,0 +1,34 @@
+# Supabase Project Configuration
+# Project ID: bscxhshnubkhngodruuj
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[auth]
+enabled = true
+# Email confirmation disabled for testing
+enable_signup = true
+email_confirm = false
+
+[functions]
+enabled = true
+
+# WebAuthn Registration Challenge
+[[functions.webauthn-register-challenge]]
+verify_jwt = true
+
+# WebAuthn Registration Verification  
+[[functions.webauthn-register-verify]]
+verify_jwt = true
+
+# WebAuthn Authentication Challenge
+[[functions.webauthn-assert-challenge]]
+verify_jwt = true
+
+# WebAuthn Authentication Verification
+[[functions.webauthn-assert-verify]]
+verify_jwt = true
