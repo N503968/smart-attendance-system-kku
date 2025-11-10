@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Users, BookOpen, Calendar, BarChart3, Plus } from 'lucide-react';
+import { Users, BookOpen, Calendar, BarChart3, Plus, RefreshCw, UserCog } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 import { supabase } from '../lib/supabase';
 import { Language, useTranslation } from '../lib/i18n';
@@ -20,6 +20,7 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
     totalCourses: 0,
     totalSchedules: 0,
     totalAttendance: 0,
+    totalEnrollments: 0,
   });
   const [users, setUsers] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
@@ -32,6 +33,9 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
     const channel = supabase
       .channel('admin-dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        loadDashboardData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, () => {
         loadDashboardData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
@@ -68,11 +72,18 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
         .from('attendance')
         .select('*', { count: 'exact', head: true });
 
+      // Get enrollments count
+      const { count: enrollmentsCount } = await supabase
+        .from('enrollments')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+
       setStats({
         totalUsers: usersCount || 0,
         totalCourses: coursesCount || 0,
         totalSchedules: schedulesCount || 0,
         totalAttendance: attendanceCount || 0,
+        totalEnrollments: enrollmentsCount || 0,
       });
 
       // Get recent users
@@ -84,16 +95,34 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
 
       setUsers(recentUsers || []);
 
-      // Get courses with instructor names
+      // Get courses data
       const { data: coursesData } = await supabase
         .from('courses')
-        .select(`
-          *,
-          instructor:profiles!instructor_id(full_name)
-        `)
-        .limit(5);
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
 
-      setCourses(coursesData || []);
+      // Get instructor IDs
+      const instructorIds = [...new Set(coursesData?.map(c => c.instructor_id) || [])];
+
+      // Get instructors
+      const { data: instructorsData } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', instructorIds);
+
+      // Create instructor map
+      const instructorsMap = new Map(instructorsData?.map(i => [i.id, i.full_name]) || []);
+
+      // Enrich courses with instructor names
+      const enrichedCourses = coursesData?.map(course => ({
+        ...course,
+        instructor: {
+          full_name: instructorsMap.get(course.instructor_id) || language === 'ar' ? 'غير محدد' : 'Unknown'
+        }
+      })) || [];
+
+      setCourses(enrichedCourses);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       toast.error(language === 'ar' ? 'فشل تحميل البيانات' : 'Failed to load data');
@@ -176,16 +205,22 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-6 max-w-7xl mx-auto space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1>{language === 'ar' ? 'لوحة تحكم المدير' : 'Admin Dashboard'}</h1>
           <p className="text-muted-foreground">{t('overview')}</p>
         </div>
-        <Button onClick={() => onNavigate('users')} className="gap-2">
-          <Plus className="w-4 h-4" />
-          {language === 'ar' ? 'إضافة مستخدم جديد' : 'Add New User'}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={loadDashboardData} variant="outline" className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            {language === 'ar' ? 'تحديث البيانات' : 'Refresh Data'}
+          </Button>
+          <Button onClick={() => onNavigate('users')} className="gap-2">
+            <Plus className="w-4 h-4" />
+            {language === 'ar' ? 'إضافة مستخدم جديد' : 'Add New User'}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

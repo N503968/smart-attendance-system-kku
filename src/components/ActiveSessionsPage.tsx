@@ -71,47 +71,87 @@ export function ActiveSessionsPage({ user, onNavigate, language }: ActiveSession
     try {
       setLoading(true);
       const now = new Date();
-      const todayStart = new Date(now);
+      const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
-      // Get today's active sessions
+      // Fetch active sessions (today and future)
       const { data: sessionsData, error: sessionsError } = await supabase
         .from('sessions')
-        .select(`
-          *,
-          sections(
-            name,
-            courses(name, code)
-          )
-        `)
-        .gte('ends_at', now.toISOString())
+        .select('*')
         .gte('starts_at', todayStart.toISOString())
         .order('starts_at', { ascending: true });
 
-      if (sessionsError) {
-        console.error('Error loading sessions:', sessionsError);
-        throw sessionsError;
+      if (sessionsError) throw sessionsError;
+
+      // Filter active sessions (handle missing ends_at)
+      const activeSessions = (sessionsData || []).filter(session => {
+        if (session.ends_at) {
+          return new Date(session.ends_at) >= now;
+        }
+        // If no ends_at, estimate 2 hours from starts_at
+        if (session.starts_at) {
+          const estimatedEnd = new Date(session.starts_at);
+          estimatedEnd.setHours(estimatedEnd.getHours() + 2);
+          return estimatedEnd >= now;
+        }
+        return true;
+      });
+
+      if (!activeSessions || activeSessions.length === 0) {
+        setSessions([]);
+        setLoading(false);
+        return;
       }
 
-      // Check attendance for each session
-      const sessionsWithAttendance = await Promise.all(
-        (sessionsData || []).map(async (session) => {
-          const { data: attendance } = await supabase
-            .from('attendance')
-            .select('id, status')
-            .eq('session_id', session.id)
-            .eq('student_id', user.id)
-            .single();
+      // Get section IDs
+      const sectionIds = [...new Set(activeSessions.map(s => s.section_id))];
 
-          return {
-            ...session,
-            hasAttended: !!attendance,
-            attendanceStatus: attendance?.status,
-          };
-        })
-      );
+      // Get sections with courses
+      const { data: sectionsData } = await supabase
+        .from('sections')
+        .select(`
+          id,
+          name,
+          course_id,
+          courses(id, name, code)
+        `)
+        .in('id', sectionIds);
 
-      setSessions(sessionsWithAttendance);
+      // Create sections map
+      const sectionsMap = new Map();
+      sectionsData?.forEach(section => {
+        sectionsMap.set(section.id, {
+          name: section.name,
+          course: section.courses
+        });
+      });
+
+      // Get session IDs for attendance check
+      const sessionIds = activeSessions.map(s => s.id);
+
+      // Get attendance records for this student
+      const { data: attendanceData } = await supabase
+        .from('attendance')
+        .select('session_id, status')
+        .in('session_id', sessionIds)
+        .eq('student_id', user.id);
+
+      // Create attendance map
+      const attendanceMap = new Map();
+      attendanceData?.forEach(att => {
+        attendanceMap.set(att.session_id, att.status);
+      });
+
+      // Enrich sessions with section and attendance data
+      const enrichedSessions = activeSessions.map(session => ({
+        ...session,
+        section: sectionsMap.get(session.section_id) || { name: '', course: { name: '', code: '' } },
+        schedule: { location: session.location || '' },
+        hasAttended: attendanceMap.has(session.id),
+        attendanceStatus: attendanceMap.get(session.id)
+      }));
+
+      setSessions(enrichedSessions);
     } catch (error) {
       console.error('Error loading sessions:', error);
       toast.error(language === 'ar' ? 'فشل تحميل الجلسات' : 'Failed to load sessions');
@@ -123,7 +163,16 @@ export function ActiveSessionsPage({ user, onNavigate, language }: ActiveSession
   const getSessionStatus = (session: SessionWithDetails) => {
     const now = new Date();
     const start = new Date(session.starts_at);
-    const end = new Date(session.ends_at);
+    
+    // Handle missing ends_at
+    let end: Date;
+    if (session.ends_at) {
+      end = new Date(session.ends_at);
+    } else {
+      // Estimate 2 hours from start
+      end = new Date(start);
+      end.setHours(end.getHours() + 2);
+    }
 
     if (now < start) {
       return { label: language === 'ar' ? 'قادمة' : 'Upcoming', color: 'text-chart-1' };

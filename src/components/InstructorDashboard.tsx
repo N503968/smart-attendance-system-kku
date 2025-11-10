@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { BookOpen, Calendar, Users, ClipboardList, Plus } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { BookOpen, Calendar, Users, ClipboardList, Plus, RefreshCw } from 'lucide-react';
 import { Profile, supabase } from '../lib/supabase';
 import { Language, useTranslation } from '../lib/i18n';
 import { toast } from 'sonner@2.0.3';
@@ -23,6 +26,12 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
     totalStudents: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [isCreateCourseOpen, setIsCreateCourseOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newCourse, setNewCourse] = useState({
+    name: '',
+    code: '',
+  });
 
   useEffect(() => {
     loadInstructorData();
@@ -30,6 +39,9 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
     // Subscribe to realtime updates
     const channel = supabase
       .channel('instructor-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courses' }, () => {
+        loadInstructorData();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' }, () => {
         loadInstructorData();
       })
@@ -51,12 +63,27 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
       const { data: coursesData, error: coursesError } = await supabase
         .from('courses')
         .select('*')
-        .eq('instructor_id', user.id);
+        .eq('instructor_id', user.id)
+        .order('created_at', { ascending: false });
 
       if (coursesError) throw coursesError;
       setCourses(coursesData || []);
 
       const courseIds = coursesData?.map(c => c.id) || [];
+
+      // Get enrollments count for these courses
+      let totalStudents = 0;
+      if (courseIds.length > 0) {
+        const { count, error: enrollmentsError } = await supabase
+          .from('enrollments')
+          .select('*', { count: 'exact', head: true })
+          .in('course_id', courseIds)
+          .eq('status', 'active');
+
+        if (!enrollmentsError) {
+          totalStudents = count || 0;
+        }
+      }
 
       // Get sections for instructor's courses
       let sectionsData: any[] = [];
@@ -79,14 +106,28 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
           .from('sessions')
           .select('*')
           .in('section_id', sectionIds)
-          .gte('ends_at', new Date().toISOString())
           .order('starts_at', { ascending: false })
           .limit(5);
 
         if (sessionsError) throw sessionsError;
         
+        // Filter active sessions (check if ends_at exists)
+        const now = new Date();
+        const filteredSessions = (sessionsList || []).filter(s => {
+          if (s.ends_at) {
+            return new Date(s.ends_at) > now;
+          }
+          // If no ends_at, assume 2 hours from starts_at
+          if (s.starts_at) {
+            const estimatedEnd = new Date(s.starts_at);
+            estimatedEnd.setHours(estimatedEnd.getHours() + 2);
+            return estimatedEnd > now;
+          }
+          return true; // Include if we can't determine
+        });
+        
         // Manually join with sections and courses data
-        sessionsData = (sessionsList || []).map(session => {
+        sessionsData = filteredSessions.map(session => {
           const section = sectionsData.find(s => s.id === session.section_id);
           const course = coursesData?.find(c => c.id === section?.course_id);
           return {
@@ -129,21 +170,74 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
 
       setTodaySchedules(schedulesData);
 
-      // Calculate stats
-      const activeSessions = sessionsData?.filter(
-        (s) => new Date(s.ends_at) > new Date()
-      ).length || 0;
+      // Calculate stats - count sessions that are active
+      const activeSessions = sessionsData.length; // Already filtered above
 
       setStats({
         totalCourses: coursesData?.length || 0,
         activeSessions,
-        totalStudents: 0, // Would need enrollment table
+        totalStudents,
       });
     } catch (error) {
       console.error('Error loading instructor data:', error);
       toast.error(language === 'ar' ? 'فشل تحميل البيانات' : 'Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateCourse = async () => {
+    if (!newCourse.name.trim() || !newCourse.code.trim()) {
+      toast.error(language === 'ar' ? 'يرجى ملء جميع الحقول' : 'Please fill all fields');
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+
+      // Insert course
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .insert({
+          name: newCourse.name.trim(),
+          code: newCourse.code.trim().toUpperCase(),
+          instructor_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (courseError) {
+        if (courseError.code === '23505') {
+          toast.error(language === 'ar' ? 'رمز المادة مستخدم بالفعل' : 'Course code already exists');
+        } else {
+          throw courseError;
+        }
+        return;
+      }
+
+      // Create default section
+      const { error: sectionError } = await supabase
+        .from('sections')
+        .insert({
+          course_id: courseData.id,
+          name: language === 'ar' ? 'الشعبة 1' : 'Section 1',
+        });
+
+      if (sectionError) {
+        console.error('Error creating section:', sectionError);
+      }
+
+      toast.success(language === 'ar' ? 'تم إنشاء المادة بنجاح' : 'Course created successfully');
+      setIsCreateCourseOpen(false);
+      setNewCourse({ name: '', code: '' });
+      
+      // Reload data
+      loadInstructorData();
+    } catch (error) {
+      console.error('Error creating course:', error);
+      toast.error(language === 'ar' ? 'فشل إنشاء المادة' : 'Failed to create course');
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -167,8 +261,8 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-6 max-w-7xl mx-auto space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h1>
             {language === 'ar' ? `مرحباً، ${user.full_name}` : `Welcome, ${user.full_name}`}
@@ -177,10 +271,16 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
             {language === 'ar' ? 'لوحة تحكم المدرس' : 'Instructor Dashboard'}
           </p>
         </div>
-        <Button onClick={() => onNavigate('create-session')} className="gap-2">
-          <Plus className="w-4 h-4" />
-          {t('createSession')}
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={loadInstructorData} variant="outline" className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            {language === 'ar' ? 'تحديث' : 'Refresh'}
+          </Button>
+          <Button onClick={() => onNavigate('create-course')} className="gap-2">
+            <Plus className="w-4 h-4" />
+            {language === 'ar' ? 'إضافة مادة جديدة' : 'Add New Course'}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
