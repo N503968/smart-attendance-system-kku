@@ -19,6 +19,8 @@ export const translations = {
     admin: 'مدير',
     instructor: 'مدرس',
     student: 'طالب',
+    supervisor: 'مشرف',
+    teacher: 'مدرس',
     
     // Dashboard
     dashboard: 'لوحة التحكم',
@@ -101,6 +103,8 @@ export const translations = {
     admin: 'Admin',
     instructor: 'Instructor',
     student: 'Student',
+    supervisor: 'Supervisor',
+    teacher: 'Teacher',
     
     // Dashboard
     dashboard: 'Dashboard',

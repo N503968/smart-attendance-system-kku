@@ -39,61 +39,114 @@ export function ReportsPage({ user, onNavigate, language }: ReportsPageProps) {
       setLoading(true);
 
       // Load courses based on role
-      if (user.role === 'instructor') {
+      if (user.role === 'teacher') {
         const { data: coursesData } = await supabase
           .from('courses')
           .select('*')
           .eq('instructor_id', user.id);
         setCourses(coursesData || []);
-      } else if (user.role === 'admin') {
+      } else if (user.role === 'supervisor') {
         const { data: coursesData } = await supabase.from('courses').select('*');
         setCourses(coursesData || []);
       }
 
-      // Build query based on role and filters
+      // Build simpler query without nested joins
       let query = supabase
         .from('attendance')
-        .select(`
-          *,
-          student:profiles!student_id(full_name, student_number),
-          session:sessions(
-            *,
-            section:sections(
-              *,
-              course:courses(*)
-            )
-          )
-        `)
+        .select('*')
         .order('marked_at', { ascending: false });
 
       // Filter by user role
       if (user.role === 'student') {
         query = query.eq('student_id', user.id);
-      } else if (user.role === 'instructor') {
-        // Filter by instructor's courses (complex query)
+      }
+
+      const { data: attendanceData, error: attendanceError } = await query.limit(100);
+
+      if (attendanceError) throw attendanceError;
+
+      // Fetch related data separately
+      let enrichedAttendance: any[] = [];
+      
+      if (attendanceData && attendanceData.length > 0) {
+        // Get unique session IDs
+        const sessionIds = [...new Set(attendanceData.map(a => a.session_id))];
+        const studentIds = [...new Set(attendanceData.map(a => a.student_id))];
+
+        // Fetch sessions
+        const { data: sessionsData } = await supabase
+          .from('sessions')
+          .select('*')
+          .in('id', sessionIds);
+
+        // Fetch students
+        const { data: studentsData } = await supabase
+          .from('profiles')
+          .select('id, full_name, student_number')
+          .in('id', studentIds);
+
+        // Get section IDs from sessions
+        const sectionIds = [...new Set((sessionsData || []).map(s => s.section_id))];
+
+        // Fetch sections
+        const { data: sectionsData } = await supabase
+          .from('sections')
+          .select('*')
+          .in('id', sectionIds);
+
+        // Get course IDs from sections
+        const courseIds = [...new Set((sectionsData || []).map(s => s.course_id))];
+
+        // Fetch courses
         const { data: coursesData } = await supabase
           .from('courses')
-          .select('id')
-          .eq('instructor_id', user.id);
-        
-        const courseIds = coursesData?.map((c) => c.id) || [];
-        if (courseIds.length > 0) {
-          // This is a simplified filter - in production, use a view or function
-          query = query.in('session.section.course.id', courseIds);
+          .select('*')
+          .in('id', courseIds);
+
+        // Manually join the data
+        enrichedAttendance = attendanceData.map(attendance => {
+          const session = sessionsData?.find(s => s.id === attendance.session_id);
+          const student = studentsData?.find(st => st.id === attendance.student_id);
+          const section = sectionsData?.find(sec => sec.id === session?.section_id);
+          const course = coursesData?.find(c => c.id === section?.course_id);
+
+          return {
+            ...attendance,
+            student: student ? {
+              full_name: student.full_name,
+              student_number: student.student_number
+            } : null,
+            session: session ? {
+              ...session,
+              section: section ? {
+                ...section,
+                course: course || null
+              } : null
+            } : null
+          };
+        });
+
+        // Filter by instructor's courses if needed
+        if (user.role === 'teacher') {
+          const { data: instructorCourses } = await supabase
+            .from('courses')
+            .select('id')
+            .eq('instructor_id', user.id);
+          
+          const instructorCourseIds = instructorCourses?.map(c => c.id) || [];
+          enrichedAttendance = enrichedAttendance.filter(a => 
+            instructorCourseIds.includes(a.session?.section?.course?.id)
+          );
         }
       }
 
       // Apply filters
+      let filteredData = enrichedAttendance;
+      
       if (selectedStatus !== 'all') {
-        query = query.eq('status', selectedStatus);
+        filteredData = filteredData.filter(a => a.status === selectedStatus);
       }
 
-      const { data: attendanceData, error } = await query.limit(100);
-
-      if (error) throw error;
-
-      // Filter by course if selected (client-side for simplicity)
-      let filteredData = attendanceData || [];
       if (selectedCourse !== 'all') {
         filteredData = filteredData.filter(
           (a) => a.session?.section?.course?.id === selectedCourse
@@ -205,7 +258,7 @@ export function ReportsPage({ user, onNavigate, language }: ReportsPageProps) {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{language === 'ar' ? 'الإ��مالي' : 'Total'}</CardTitle>
+            <CardTitle className="text-sm">{language === 'ar' ? 'الإمالي' : 'Total'}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-3xl">{stats.total}</div>

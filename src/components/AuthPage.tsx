@@ -6,9 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { supabase, Profile } from '../lib/supabase';
-import { GraduationCap, Mail, Lock, User, IdCard, Globe, UserCog, Sparkles } from 'lucide-react';
+import { GraduationCap, Mail, Lock, User, IdCard, Globe, UserCog, Sparkles, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner@2.0.3';
 import { Language, useTranslation } from '../lib/i18n';
+import { Alert, AlertDescription } from './ui/alert';
 
 interface AuthPageProps {
   onLogin: (user: Profile) => void;
@@ -29,7 +30,7 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerFullName, setRegisterFullName] = useState('');
   const [registerStudentNumber, setRegisterStudentNumber] = useState('');
-  const [registerRole, setRegisterRole] = useState<'student' | 'instructor' | 'admin'>('student');
+  const [registerRole, setRegisterRole] = useState<'student' | 'teacher' | 'supervisor'>('student');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +54,7 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
           );
           console.error('\n\n❌ EMAIL CONFIRMATION ERROR\n');
           console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.error('📖 Solution: Open /DO-THIS-NOW.md');
+          console.error('📖 Solution: Open /⚠️-FIX-THIS-FIRST.md');
           console.error('🔗 Or go to: https://supabase.com/dashboard/project/bscxhshnubkhngodruuj/settings/auth');
           console.error('⚙️  Find: "Enable email confirmations" and turn it OFF');
           console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
@@ -62,7 +63,7 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
         throw authError;
       }
 
-      // Get user profile
+      // Get user profile from profiles table
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -71,7 +72,7 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
 
       if (profileError) throw profileError;
 
-      toast.success(language === 'ar' ? 'تم تسجيل الدخول بنجاح' : 'Login successful');
+      toast.success(language === 'ar' ? '✅ تم تسجيل الدخول بنجاح' : '✅ Login successful');
       onLogin(profile);
     } catch (error: any) {
       console.error('Login error:', error);
@@ -90,8 +91,31 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
     setIsLoading(true);
 
     try {
-      // Simplified registration - no student number check for testing
-      // Create auth user
+      // Validate email domain for KKU
+      if (!registerEmail.toLowerCase().endsWith('@kku.edu.sa')) {
+        toast.error(
+          language === 'ar'
+            ? '⚠️ يجب استخدام البريد الجامعي (@kku.edu.sa) فقط'
+            : '⚠️ Only KKU email addresses (@kku.edu.sa) are allowed',
+          { duration: 5000 }
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Validate student number for students
+      if (registerRole === 'student' && !registerStudentNumber.trim()) {
+        toast.error(
+          language === 'ar'
+            ? '⚠️ الرقم الجامعي مطلوب للطلاب'
+            : '⚠️ Student number is required for students',
+          { duration: 5000 }
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Create auth user with Supabase
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: registerEmail,
         password: registerPassword,
@@ -99,52 +123,75 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
           data: {
             full_name: registerFullName,
             role: registerRole,
+            student_number: registerRole === 'student' ? registerStudentNumber : null,
           },
         },
       });
 
       if (authError) throw authError;
 
-      // Create profile
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: authData.user!.id,
-        full_name: registerFullName,
-        email: registerEmail,
-        role: registerRole,
-        student_number: registerRole === 'student' && registerStudentNumber ? registerStudentNumber : null,
-      });
+      if (!authData.user) {
+        throw new Error('Failed to create user account');
+      }
 
-      if (profileError) {
-        // Handle PGRST205 error (table not found)
-        if (profileError.code === 'PGRST205') {
-          toast.error(
-            language === 'ar'
-              ? '⚠️ قاعدة البيانات غير جاهزة. يرجى تطبيق Schema من ملف /DO-THIS-NOW.md'
-              : '⚠️ Database not ready. Please apply Schema from /DO-THIS-NOW.md',
-            { duration: 8000 }
-          );
-          console.error('\n\n❌ DATABASE SCHEMA ERROR (PGRST205)\n');
-          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          console.error('📖 Solution: Open /DO-THIS-NOW.md');
-          console.error('🔗 Or go to: https://supabase.com/dashboard/project/bscxhshnubkhngodruuj/sql');
-          console.error('📝 Copy content of /supabase-schema.sql and paste it in SQL Editor');
-          console.error('▶️  Click Run (Ctrl+Enter)');
-          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
+      // Wait a bit for the trigger to create the profile
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Update the profile with complete information (trigger might not have all metadata)
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: registerFullName,
+          role: registerRole,
+          student_number: registerRole === 'student' ? registerStudentNumber : null,
+        })
+        .eq('id', authData.user.id);
+
+      if (updateError) {
+        // If update fails, it might mean the profile wasn't created by trigger
+        // Try to insert it
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: authData.user.id,
+            full_name: registerFullName,
+            email: registerEmail,
+            role: registerRole,
+            student_number: registerRole === 'student' ? registerStudentNumber : null,
+          });
+
+        if (insertError && insertError.code !== '23505') {
+          // Handle PGRST205 error (table not found)
+          if (insertError.code === 'PGRST205') {
+            toast.error(
+              language === 'ar'
+                ? '⚠️ قاعدة البيانات غير جاهزة. يرجى تطبيق Schema من ملف /DO-THIS-NOW.md'
+                : '⚠️ Database not ready. Please apply Schema from /DO-THIS-NOW.md',
+              { duration: 8000 }
+            );
+            console.error('\n\n❌ DATABASE SCHEMA ERROR (PGRST205)\n');
+            console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            console.error('📖 Solution: Open /DO-THIS-NOW.md');
+            console.error('🔗 Or go to: https://supabase.com/dashboard/project/bscxhshnubkhngodruuj/sql');
+            console.error('📝 Copy content of /supabase-schema.sql and paste it in SQL Editor');
+            console.error('▶️  Click Run (Ctrl+Enter)');
+            console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
+            
+            // Delete the auth user since profile creation failed
+            await supabase.auth.admin.deleteUser(authData.user.id);
+            return;
+          }
           
-          // Delete the auth user since profile creation failed
-          await supabase.auth.admin.deleteUser(authData.user!.id);
-          return;
+          // If it's not a duplicate key error (23505), throw it
+          throw insertError;
         }
-        
-        // If profile creation fails, delete the auth user
-        await supabase.auth.admin.deleteUser(authData.user!.id);
-        throw profileError;
       }
 
       toast.success(
         language === 'ar'
-          ? 'تم إنشاء الحساب بنجاح. يمكنك الآن تسجيل الدخول'
-          : 'Account created successfully. You can now login'
+          ? '✅ تم إنشاء الحساب بنجاح. يمكنك الآن تسجيل الدخول'
+          : '✅ Account created successfully. You can now login',
+        { duration: 5000 }
       );
 
       // Clear form
@@ -163,10 +210,14 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
         errorMessage = language === 'ar' 
           ? 'قاعدة البيانات غير جاهزة - راجع /QUICK-FIX.md'
           : 'Database not ready - See /QUICK-FIX.md';
-      } else if (error.message?.includes('already registered')) {
+      } else if (error.message?.includes('already registered') || error.message?.includes('already been registered')) {
         errorMessage = language === 'ar'
           ? 'هذا البريد مسجل مسبقاً'
           : 'Email already registered';
+      } else if (error.message?.includes('Password')) {
+        errorMessage = language === 'ar'
+          ? 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+          : 'Password must be at least 6 characters';
       }
       
       toast.error(errorMessage || (language === 'ar' ? 'فشل إنشاء الحساب' : 'Registration failed'));
@@ -302,6 +353,17 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
               {/* Register Tab */}
               <TabsContent value="register" className="mt-6">
                 <form onSubmit={handleRegister} className="space-y-5">
+                  {/* KKU Email Notice */}
+                  <Alert className="border-primary/30 bg-primary/5">
+                    <AlertCircle className="h-4 w-4 text-primary" />
+                    <AlertDescription className="text-sm">
+                      {language === 'ar' 
+                        ? '🎓 يجب استخدام البريد الجامعي (@kku.edu.sa) للتسجيل'
+                        : '🎓 KKU email address (@kku.edu.sa) is required for registration'
+                      }
+                    </AlertDescription>
+                  </Alert>
+
                   {/* Full Name */}
                   <div className="space-y-2">
                     <Label htmlFor="register-name" className="flex items-center gap-2">
@@ -329,13 +391,19 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
                     <Input
                       id="register-email"
                       type="email"
-                      placeholder={language === 'ar' ? 'أدخل بريدك الإلكتروني' : 'Enter your email'}
+                      placeholder={language === 'ar' ? 'البريد الجامعي@kku.edu.sa' : 'your.email@kku.edu.sa'}
                       value={registerEmail}
                       onChange={(e) => setRegisterEmail(e.target.value)}
                       required
                       className="h-12 border-2 focus:border-primary transition-colors"
                       disabled={isLoading}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      {language === 'ar' 
+                        ? '⚠️ استخدم البريد الجامعي المنتهي بـ @kku.edu.sa'
+                        : '⚠️ Use your university email ending with @kku.edu.sa'
+                      }
+                    </p>
                   </div>
 
                   {/* Role Selector */}
@@ -352,11 +420,11 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
                         <SelectItem value="student">
                           {language === 'ar' ? '👨‍🎓 طالب' : '👨‍🎓 Student'}
                         </SelectItem>
-                        <SelectItem value="instructor">
-                          {language === 'ar' ? '👨‍🏫 مدرس' : '👨‍🏫 Instructor'}
+                        <SelectItem value="teacher">
+                          {language === 'ar' ? '👨‍🏫 مدرس' : '👨‍🏫 Teacher'}
                         </SelectItem>
-                        <SelectItem value="admin">
-                          {language === 'ar' ? '👤 مشرف' : '👤 Admin'}
+                        <SelectItem value="supervisor">
+                          {language === 'ar' ? '👤 مشرف' : '👤 Supervisor'}
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -369,25 +437,32 @@ export function AuthPage({ onLogin, language, onLanguageChange }: AuthPageProps)
                     </p>
                   </div>
 
-                  {/* Student Number (Optional - only for students) */}
+                  {/* Student Number (Required for students) */}
                   {registerRole === 'student' && (
                     <div className="space-y-2">
                       <Label htmlFor="register-student-number" className="flex items-center gap-2">
                         <IdCard className="w-4 h-4 text-primary" />
                         {t('studentNumber')} 
-                        <span className="text-xs text-muted-foreground">
-                          ({language === 'ar' ? 'اختياري' : 'Optional'})
+                        <span className="text-xs text-destructive">
+                          *{language === 'ar' ? 'مطلوب' : 'Required'}
                         </span>
                       </Label>
                       <Input
                         id="register-student-number"
                         type="text"
-                        placeholder={language === 'ar' ? 'أدخل رقمك الجامعي (اختياري)' : 'Enter student number (optional)'}
+                        placeholder={language === 'ar' ? 'أدخل رقمك الجامعي (مطلوب)' : 'Enter student number (required)'}
                         value={registerStudentNumber}
                         onChange={(e) => setRegisterStudentNumber(e.target.value)}
+                        required
                         className="h-12 border-2 focus:border-primary transition-colors"
                         disabled={isLoading}
                       />
+                      <p className="text-xs text-muted-foreground">
+                        {language === 'ar' 
+                          ? '📝 الرقم الجامعي مطلوب للطلاب'
+                          : '📝 Student number is required for students'
+                        }
+                      </p>
                     </div>
                   )}
 

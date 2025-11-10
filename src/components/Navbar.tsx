@@ -46,16 +46,22 @@ export function Navbar({ user, onLogout, language, onLanguageChange, onNavigate 
   const getRoleLabel = (role: string) => {
     if (language === 'ar') {
       switch (role) {
-        case 'admin': return 'مدير';
-        case 'instructor': return 'مدرس';
+        case 'supervisor': return 'مشرف';
+        case 'teacher': return 'مدرس';
         case 'student': return 'طالب';
+        // Legacy support
+        case 'admin': return 'مشرف';
+        case 'instructor': return 'مدرس';
         default: return role;
       }
     } else {
       switch (role) {
-        case 'admin': return 'Admin';
-        case 'instructor': return 'Instructor';
+        case 'supervisor': return 'Supervisor';
+        case 'teacher': return 'Teacher';
         case 'student': return 'Student';
+        // Legacy support
+        case 'admin': return 'Supervisor';
+        case 'instructor': return 'Teacher';
         default: return role;
       }
     }

@@ -79,16 +79,19 @@ export function ActiveSessionsPage({ user, onNavigate, language }: ActiveSession
         .from('sessions')
         .select(`
           *,
-          section:sections(
+          sections(
             name,
-            course:courses(name, code)
+            courses(name, code)
           )
         `)
         .gte('ends_at', now.toISOString())
         .gte('starts_at', todayStart.toISOString())
         .order('starts_at', { ascending: true });
 
-      if (sessionsError) throw sessionsError;
+      if (sessionsError) {
+        console.error('Error loading sessions:', sessionsError);
+        throw sessionsError;
+      }
 
       // Check attendance for each session
       const sessionsWithAttendance = await Promise.all(
@@ -200,10 +203,10 @@ export function ActiveSessionsPage({ user, onNavigate, language }: ActiveSession
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <CardTitle className="mb-1">
-                        {session.section?.course?.name || language === 'ar' ? 'غير محدد' : 'Unknown'}
+                        {session.sections?.courses?.name || (language === 'ar' ? 'غير محدد' : 'Unknown')}
                       </CardTitle>
                       <CardDescription>
-                        {session.section?.course?.code} - {session.section?.name}
+                        {session.sections?.courses?.code} - {session.sections?.name}
                       </CardDescription>
                     </div>
                     <div
@@ -229,7 +232,7 @@ export function ActiveSessionsPage({ user, onNavigate, language }: ActiveSession
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <MapPin className="w-4 h-4" />
-                      <span>{language === 'ar' ? 'القاعة' : 'Room'}</span>
+                      <span>{language === 'ar' ? 'الاعة' : 'Room'}</span>
                     </div>
                   </div>
 

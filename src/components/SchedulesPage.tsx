@@ -17,6 +17,7 @@ export function SchedulesPage({ user, onNavigate, language }: SchedulesPageProps
   const { t } = useTranslation(language);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [courses, setCourses] = useState<any[]>([]);
 
   useEffect(() => {
     loadSchedules();
@@ -26,48 +27,69 @@ export function SchedulesPage({ user, onNavigate, language }: SchedulesPageProps
     try {
       setLoading(true);
 
+      // Get schedules first
       let query = supabase
         .from('schedules')
-        .select(`
-          *,
-          section:sections(
-            *,
-            course:courses(*)
-          )
-        `)
+        .select('*')
         .order('day_of_week', { ascending: true })
         .order('start_time', { ascending: true });
 
-      // Filter based on role
-      if (user.role === 'instructor') {
+      const { data: schedulesData, error: schedulesError } = await query;
+
+      if (schedulesError) throw schedulesError;
+
+      let enrichedSchedules: any[] = [];
+
+      if (schedulesData && schedulesData.length > 0) {
+        // Get unique section IDs
+        const sectionIds = [...new Set(schedulesData.map(s => s.section_id))];
+
+        // Fetch sections
+        const { data: sectionsData } = await supabase
+          .from('sections')
+          .select('*')
+          .in('id', sectionIds);
+
+        // Get course IDs from sections
+        const courseIds = [...new Set((sectionsData || []).map(s => s.course_id))];
+
+        // Fetch courses
         const { data: coursesData } = await supabase
           .from('courses')
-          .select('id')
-          .eq('instructor_id', user.id);
+          .select('*')
+          .in('id', courseIds);
 
-        const courseIds = coursesData?.map((c) => c.id) || [];
-        // Note: This is simplified - in production use a database view
+        setCourses(coursesData || []);
+
+        // Manually join the data
+        enrichedSchedules = schedulesData.map(schedule => {
+          const section = sectionsData?.find(sec => sec.id === schedule.section_id);
+          const course = coursesData?.find(c => c.id === section?.course_id);
+
+          return {
+            ...schedule,
+            section: section ? {
+              ...section,
+              course: course || null
+            } : null
+          };
+        });
+
+        // Filter based on role
+        if (user.role === 'teacher') {
+          const { data: instructorCourses } = await supabase
+            .from('courses')
+            .select('id')
+            .eq('instructor_id', user.id);
+
+          const instructorCourseIds = instructorCourses?.map(c => c.id) || [];
+          enrichedSchedules = enrichedSchedules.filter(s =>
+            instructorCourseIds.includes(s.section?.course?.id)
+          );
+        }
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      // Filter by instructor's courses if needed (client-side for simplicity)
-      let filteredData = data || [];
-      if (user.role === 'instructor') {
-        const { data: coursesData } = await supabase
-          .from('courses')
-          .select('id')
-          .eq('instructor_id', user.id);
-
-        const courseIds = coursesData?.map((c) => c.id) || [];
-        filteredData = filteredData.filter((s) =>
-          courseIds.includes(s.section?.course?.id)
-        );
-      }
-
-      setSchedules(filteredData);
+      setSchedules(enrichedSchedules);
     } catch (error) {
       console.error('Error loading schedules:', error);
       toast.error(language === 'ar' ? 'فشل تحميل الجداول' : 'Failed to load schedules');

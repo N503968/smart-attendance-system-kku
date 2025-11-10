@@ -157,9 +157,9 @@ export default function App() {
     switch (currentPage) {
       case 'dashboard':
         // Redirect to role-specific dashboard
-        if (currentUser.role === 'admin') {
+        if (currentUser.role === 'supervisor') {
           return <AdminDashboard onNavigate={handleNavigate} language={language} />;
-        } else if (currentUser.role === 'instructor') {
+        } else if (currentUser.role === 'teacher') {
           return <InstructorDashboard user={currentUser} onNavigate={handleNavigate} language={language} />;
         } else if (currentUser.role === 'student') {
           return <StudentDashboard user={currentUser} onNavigate={handleNavigate} language={language} />;
@@ -180,8 +180,8 @@ export default function App() {
         }
       
       case 'create-session':
-        // Only instructors can access
-        if (currentUser.role === 'instructor') {
+        // Only teachers can access
+        if (currentUser.role === 'teacher') {
           return <CreateSessionPage user={currentUser} onNavigate={handleNavigate} language={language} />;
         }
         // Redirect unauthorized users to their dashboard
@@ -232,8 +232,8 @@ export default function App() {
         return <SchedulesPage user={currentUser} onNavigate={handleNavigate} language={language} />;
       
       case 'users':
-        // Only admins can access user management
-        if (currentUser.role === 'admin') {
+        // Only supervisors can access user management
+        if (currentUser.role === 'supervisor') {
           return <UsersPage onNavigate={handleNavigate} language={language} />;
         }
         // Redirect unauthorized users to their dashboard
@@ -242,7 +242,7 @@ export default function App() {
           <div className="flex items-center justify-center min-h-screen">
             <div className="text-center p-6">
               <p className="text-destructive mb-4">
-                {language === 'ar' ? 'هذه الصفحة متاحة للمدراء فقط' : 'This page is for admins only'}
+                {language === 'ar' ? 'هذه الصفحة متاحة للمشرفين فقط' : 'This page is for supervisors only'}
               </p>
               <Button onClick={() => handleNavigate('dashboard')}>
                 {language === 'ar' ? 'العودة للوحة التحكم' : 'Back to Dashboard'}

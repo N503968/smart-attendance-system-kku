@@ -1,7 +1,7 @@
 {
   "name": "kku-smart-attendance-system",
-  "version": "1.0.0",
-  "description": "Smart Attendance & Scheduling System for King Khalid University",
+  "version": "2.0.0",
+  "description": "Smart Attendance & Scheduling System for King Khalid University - Updated Roles (student, teacher, supervisor)",
   "type": "module",
   "scripts": {
     "dev": "vite",

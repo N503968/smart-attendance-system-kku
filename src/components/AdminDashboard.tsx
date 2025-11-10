@@ -136,12 +136,12 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
   const userRoleData = [
     {
       name: t('admin'),
-      value: users.filter((u) => u.role === 'admin').length,
+      value: users.filter((u) => u.role === 'supervisor').length,
       color: '#1ABC9C',
     },
     {
       name: t('instructor'),
-      value: users.filter((u) => u.role === 'instructor').length,
+      value: users.filter((u) => u.role === 'teacher').length,
       color: '#3498DB',
     },
     {
@@ -153,9 +153,9 @@ export function AdminDashboard({ onNavigate, language }: AdminDashboardProps) {
 
   const getRoleLabel = (role: string) => {
     switch (role) {
-      case 'admin':
+      case 'supervisor':
         return t('admin');
-      case 'instructor':
+      case 'teacher':
         return t('instructor');
       case 'student':
         return t('student');

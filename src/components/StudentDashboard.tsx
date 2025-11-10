@@ -62,11 +62,11 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
         .from('attendance')
         .select(`
           *,
-          session:sessions(
+          sessions(
             *,
-            section:sections(
+            sections(
               *,
-              course:courses(*)
+              courses(*)
             )
           )
         `)
@@ -74,7 +74,10 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
         .order('marked_at', { ascending: false })
         .limit(10);
 
-      if (attendanceError) throw attendanceError;
+      if (attendanceError) {
+        console.error('Error loading student data:', attendanceError);
+        throw attendanceError;
+      }
       setRecentAttendance(attendanceData || []);
 
       // Calculate stats
@@ -87,17 +90,21 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
 
       // Get today's schedule (would need enrollment table for accurate data)
       const today = new Date().getDay();
-      const { data: schedulesData } = await supabase
+      const { data: schedulesData, error: schedulesError } = await supabase
         .from('schedules')
         .select(`
           *,
-          section:sections(
+          sections(
             *,
-            course:courses(*)
+            courses(*)
           )
         `)
         .eq('day_of_week', today)
         .limit(5);
+
+      if (schedulesError) {
+        console.error('Error loading schedules:', schedulesError);
+      }
 
       setTodaySchedules(schedulesData || []);
     } catch (error) {
@@ -309,9 +316,9 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
                   <div key={schedule.id} className="p-4 bg-muted/50 rounded-lg">
                     <div className="flex justify-between items-start mb-2">
                       <div>
-                        <p className="font-medium">{schedule.section?.course?.name}</p>
+                        <p className="font-medium">{schedule.sections?.courses?.name || (language === 'ar' ? 'غير محدد' : 'Unknown')}</p>
                         <p className="text-sm text-muted-foreground">
-                          {schedule.section?.name}
+                          {schedule.sections?.name || ''}
                         </p>
                       </div>
                     </div>
@@ -320,7 +327,7 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
                         {schedule.start_time} - {schedule.end_time}
                       </span>
                       <span>•</span>
-                      <span>{schedule.location}</span>
+                      <span>{schedule.location || (language === 'ar' ? 'غير محدد' : 'TBA')}</span>
                     </div>
                   </div>
                 ))
@@ -390,7 +397,7 @@ export function StudentDashboard({ user, onNavigate, language }: StudentDashboar
                     {getStatusIcon(record.status)}
                     <div>
                       <p className="font-medium">
-                        {record.session?.section?.course?.name || language === 'ar' ? 'غير محدد' : 'Unknown'}
+                        {record.sessions?.sections?.courses?.name || (language === 'ar' ? 'غير محدد' : 'Unknown')}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {new Date(record.marked_at).toLocaleDateString(language, {

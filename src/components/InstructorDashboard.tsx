@@ -56,40 +56,78 @@ export function InstructorDashboard({ user, onNavigate, language }: InstructorDa
       if (coursesError) throw coursesError;
       setCourses(coursesData || []);
 
-      // Get active sessions for instructor's courses
-      const { data: sessionsData, error: sessionsError } = await supabase
-        .from('sessions')
-        .select(`
-          *,
-          section:sections!inner(
-            *,
-            course:courses!inner(*)
-          )
-        `)
-        .eq('section.course.instructor_id', user.id)
-        .gte('ends_at', new Date().toISOString())
-        .order('starts_at', { ascending: false })
-        .limit(5);
+      const courseIds = coursesData?.map(c => c.id) || [];
 
-      if (sessionsError) throw sessionsError;
-      setSessions(sessionsData || []);
+      // Get sections for instructor's courses
+      let sectionsData: any[] = [];
+      if (courseIds.length > 0) {
+        const { data: sectionsList, error: sectionsError } = await supabase
+          .from('sections')
+          .select('id, course_id, name')
+          .in('course_id', courseIds);
+
+        if (sectionsError) throw sectionsError;
+        sectionsData = sectionsList || [];
+      }
+
+      const sectionIds = sectionsData.map(s => s.id);
+
+      // Get active sessions for instructor's sections
+      let sessionsData: any[] = [];
+      if (sectionIds.length > 0) {
+        const { data: sessionsList, error: sessionsError } = await supabase
+          .from('sessions')
+          .select('*')
+          .in('section_id', sectionIds)
+          .gte('ends_at', new Date().toISOString())
+          .order('starts_at', { ascending: false })
+          .limit(5);
+
+        if (sessionsError) throw sessionsError;
+        
+        // Manually join with sections and courses data
+        sessionsData = (sessionsList || []).map(session => {
+          const section = sectionsData.find(s => s.id === session.section_id);
+          const course = coursesData?.find(c => c.id === section?.course_id);
+          return {
+            ...session,
+            section: section ? {
+              ...section,
+              course: course || null
+            } : null
+          };
+        });
+      }
+
+      setSessions(sessionsData);
 
       // Get today's schedules
       const today = new Date().getDay();
-      const { data: schedulesData, error: schedulesError } = await supabase
-        .from('schedules')
-        .select(`
-          *,
-          section:sections!inner(
-            *,
-            course:courses!inner(*)
-          )
-        `)
-        .eq('section.course.instructor_id', user.id)
-        .eq('day_of_week', today);
+      let schedulesData: any[] = [];
+      if (sectionIds.length > 0) {
+        const { data: schedulesList, error: schedulesError } = await supabase
+          .from('schedules')
+          .select('*')
+          .in('section_id', sectionIds)
+          .eq('day_of_week', today);
 
-      if (schedulesError) throw schedulesError;
-      setTodaySchedules(schedulesData || []);
+        if (schedulesError) throw schedulesError;
+        
+        // Manually join with sections and courses data
+        schedulesData = (schedulesList || []).map(schedule => {
+          const section = sectionsData.find(s => s.id === schedule.section_id);
+          const course = coursesData?.find(c => c.id === section?.course_id);
+          return {
+            ...schedule,
+            section: section ? {
+              ...section,
+              course: course || null
+            } : null
+          };
+        });
+      }
+
+      setTodaySchedules(schedulesData);
 
       // Calculate stats
       const activeSessions = sessionsData?.filter(

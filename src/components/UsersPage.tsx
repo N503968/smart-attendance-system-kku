@@ -102,8 +102,8 @@ export function UsersPage({ onNavigate, language }: UsersPageProps) {
 
   const stats = {
     total: users.length,
-    admins: users.filter((u) => u.role === 'admin').length,
-    instructors: users.filter((u) => u.role === 'instructor').length,
+    admins: users.filter((u) => u.role === 'supervisor').length,
+    instructors: users.filter((u) => u.role === 'teacher').length,
     students: users.filter((u) => u.role === 'student').length,
   };
 
@@ -134,7 +134,7 @@ export function UsersPage({ onNavigate, language }: UsersPageProps) {
         </div>
         <Button className="gap-2">
           <UserPlus className="w-4 h-4" />
-          {language === 'ar' ? 'إضافة مستخدم' : 'Add User'}
+          {language === 'ar' ? 'إضافة مست��دم' : 'Add User'}
         </Button>
       </div>
 
